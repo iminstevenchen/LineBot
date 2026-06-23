@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+config.ini
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Claude Code session data
+.claude/
+
+# Large files not needed on server
+*.pdf
+Static/img/rich_menu.png

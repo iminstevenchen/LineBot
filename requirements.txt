@@ -1,0 +1,8 @@
+flask==3.1.0
+gunicorn==23.0.0
+line-bot-sdk==3.23.0
+python-dotenv==1.0.1
+psycopg2-binary
+groq
+Pillow
+requests
