@@ -14,6 +14,11 @@ __pycache__/
 # Claude Code session data
 .claude/
 
-# Large files not needed on server
+# Large binary files
 *.pdf
+*.pptx
+*.ppt
 Static/img/rich_menu.png
+
+# Reference material (has nested git repo)
+Reference/

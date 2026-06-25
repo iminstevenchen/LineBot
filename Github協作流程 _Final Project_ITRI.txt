@@ -1,0 +1,125 @@
+Github協作流程
+
+5人協作日常工作流程詳解
+
+【第一次設定】每人只做一次
+打開終端機，在專案目錄下執行：
+git config pull.rebase true
+
+【每天開工】
+git checkout main
+git pull
+確保你拿到的是最新版本的 main。
+
+【開始做任務】建立自己的 branch
+git checkout -b feature/policy-filter
+branch 命名原則：
+
+還不確定做什麼 wip/描述
+確定是新功能 feature/描述
+確定是修 bug fix/描述
+設定、文件 chore/描述
+
+【開發中】小步 commit
+# 只加這次要 commit 的檔案，不要 git add .
+git add app/services/policy_engine.py
+
+# commit 訊息說清楚做了什麼
+git commit -m "feat: 加入 city_match 篩選邏輯"
+commit 訊息前綴：
+
+feat: 新功能
+fix: 修 bug
+chore: 設定、文件
+refactor: 重構
+
+【準備送 PR】接上最新的 main
+你開發這幾天，別人可能已經把新東西 merge 進 main 了。送 PR 前要先把你的 branch 接上最新的 main：
+
+# 步驟1：去遠端下載最新的 main（只是下載，不改你的檔案）
+git fetch origin
+
+# 步驟2：把你的 commits 接到最新 main 後面
+git rebase origin/main
+
+如果出現衝突（你和別人改了同一個地方）：
+# VSCode 會標紅，選好要保留哪個版本之後
+git add <衝突的檔案>
+git rebase --continue
+
+沒有衝突的話，直接：
+# 第一次 push 加 -u，之後只要 git push
+git push -u origin feature/policy-filter
+
+【在 GitHub 開 PR】
+push 完去 GitHub，首頁會出現黃色提示欄
+點 Compare & pull request
+填寫：
+標題：feat: 加入 city_match 篩選邏輯
+描述：說明做了什麼、怎麼測試
+右邊指定 Reviewers（至少選一個隊友）
+點 Create pull request
+
+【等待 Review】
+隊友看你的程式碼，可能會留言要你修改
+修改後在同一條 branch 上繼續 commit，再 git push，PR 會自動更新
+隊友按 Approve 核准
+
+【Merge 進 main】
+隊友核准後，選 Squash and merge（讓 main 歷史乾淨），按下去。
+
+【Merge 後收尾】
+# 回到 main 同步
+git checkout main
+git pull
+
+# 刪掉已經 merge 的 branch
+git branch -d feature/policy-filter
+完整流程一張圖
+
+每天開工
+git checkout main → git pull
+        │
+        ▼
+建 branch
+git checkout -b feature/xxx
+        │
+        ▼
+開發 + commit（可以多次）
+git add <檔案> → git commit -m "feat: xxx"
+        │
+        ▼
+送 PR 前同步
+git fetch origin → git rebase origin/main
+        │
+        ▼
+推上遠端
+git push -u origin feature/xxx
+        │
+        ▼
+GitHub 開 PR → 隊友 Review → Approve
+        │
+        ▼
+Squash and merge 進 main
+        │
+        ▼
+收尾
+git checkout main → git pull → git branch -d feature/xxx
+
+5人協作最容易出問題的地方
+問題1:                        
+直接 push 到 main 
+解法1:
+GitHub 設 Branch Protection，強制要 PR
+問題2:
+PR 沒人看就 merge
+解法2: 
+設定 require 1 approval
+問題3:
+Branch 開太久衝突爆炸
+解法3:
+2–3 天內送 PR，任務拆小
+問題4:
+兩人同時改同一個檔案 
+解法4:
+開工前在群組說「我在動 X 檔案」
