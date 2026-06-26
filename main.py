@@ -188,15 +188,29 @@ def handle_message(event: MessageEvent):
 
 
 def _process_qa_async(user_id: str, text: str, context_for_llm: dict, history: list) -> None:
+    import time as _time
+    t_start = _time.time()
     try:
         rag_query  = llm.build_rag_query(text, context_for_llm, history)
-        logger.info("RAG query：%s", rag_query)
+
+        t1 = _time.time()
         rag_chunks = rag.query_rag(rag_query)
-        logger.info("RAG 命中 %d 個片段", len(rag_chunks))
+        logger.info("⏱ RAG：%.2fs（%d 片段）", _time.time() - t1, len(rag_chunks))
+
+        t2 = _time.time()
         reply = llm.generate_reply(text, context_for_llm, rag_chunks, history)
+        logger.info("⏱ LLM：%.2fs", _time.time() - t2)
+
+        t3 = _time.time()
         db.save_message(user_id, "assistant", reply)
         db.trim_chat_history(user_id, keep=30)
+        logger.info("⏱ DB write：%.2fs", _time.time() - t3)
+
+        t4 = _time.time()
         _push_text(user_id, reply)
+        logger.info("⏱ Push：%.2fs", _time.time() - t4)
+
+        logger.info("⏱ 總計：%.2fs", _time.time() - t_start)
     except Exception as e:
         logger.error("背景問答處理失敗：%s", e)
         _push_text(user_id, "😅 小幫手暫時遇到一點問題，請稍後再試，或撥打 1922 育兒諮詢專線。")
