@@ -279,6 +279,33 @@ def get_recent_history(line_user_id: str, limit: int = 10) -> list[dict]:
     return [dict(r) for r in reversed(rows)]
 
 
+def get_all_active_users_with_children() -> list[tuple[dict, dict]]:
+    """Return (user_dict, child_dict) for every completed-onboarding user with a birth_date."""
+    sql = """
+        SELECT
+            u.line_user_id, u.parent_name, u.city, u.parental_employment,
+            c.child_id, c.child_name, c.birth_date, c.gender, c.birth_order, c.special_status
+        FROM user_profiles u
+        JOIN children c ON c.child_id = u.active_child_id
+        WHERE u.onboarding_state = 'done'
+          AND c.birth_date IS NOT NULL
+    """
+    _user_keys  = {"line_user_id", "parent_name", "city", "parental_employment"}
+    _child_keys = {"child_id", "child_name", "birth_date", "gender", "birth_order", "special_status"}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+    result = []
+    for row in rows:
+        row = dict(row)
+        result.append(
+            ({k: row[k] for k in _user_keys},
+             {k: row[k] for k in _child_keys})
+        )
+    return result
+
+
 def trim_chat_history(line_user_id: str, keep: int = 30) -> None:
     """只保留最近 keep 筆對話，超出的舊訊息刪除。"""
     sql = """

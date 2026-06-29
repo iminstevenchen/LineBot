@@ -17,6 +17,7 @@ import config
 import db
 import llm
 import onboarding
+import push_scheduler
 import rag
 
 # ── LINE SDK 初始化 ────────────────────────────────────────────────────────────
@@ -35,6 +36,8 @@ try:
     db.init_tables()
 except Exception as e:
     logger.warning("DB 初始化失敗（稍後重試）：%s", e)
+
+push_scheduler.start_scheduler()
 
 
 # ── Webhook 路由 ───────────────────────────────────────────────────────────────
@@ -56,6 +59,13 @@ def callback():
 @app.route("/health", methods=["GET"])
 def health():
     return {"status": "ok"}, 200
+
+
+@app.route("/admin/push-now", methods=["POST"])
+def admin_push_now():
+    """Manually trigger daily push (for testing only)."""
+    threading.Thread(target=push_scheduler.run_daily_push, daemon=True).start()
+    return {"status": "triggered"}, 200
 
 
 # ── Follow 事件（使用者加入好友） ─────────────────────────────────────────────
