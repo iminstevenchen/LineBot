@@ -3,7 +3,7 @@
 Three notification types, staggered to avoid same-day overload:
 
   1. Health events (vaccine + well-baby checkup) — daily check at 09:00.
-     Fires when a milestone is exactly TODAY or exactly 7 DAYS away.
+     Fires when a milestone is exactly TODAY.
      Vaccine and checkup events on the same day are COMBINED into one message.
 
   2. Developmental milestones — fires once on the baby's monthly anniversary
@@ -101,41 +101,38 @@ def _age_months(birth_date: date, today: date) -> int:
 # ── Health event collectors ───────────────────────────────────────────────────────
 
 def _due_health_events(birth_date: date, today: date) -> dict[date, list[tuple[str, str]]]:
-    """Return {due_date: [(kind, name), ...]} for events due today or in 7 days.
+    """Return {due_date: [(kind, name), ...]} for events due exactly today.
 
     kind is either 'vaccine' or 'checkup'.
-    Only fires on exactly today (days_until == 0) or exactly 7 days out.
     """
     events: dict[date, list] = defaultdict(list)
     for months, vaccines in _VACCINE_SCHEDULE.items():
         due = _add_months(birth_date, months)
-        if (due - today).days in (0, 7):
+        if (due - today).days == 0:
             for v in vaccines:
                 events[due].append(("vaccine", v))
     for months, checkup in _CHECKUP_SCHEDULE.items():
         due = _add_months(birth_date, months)
-        if (due - today).days in (0, 7):
+        if (due - today).days == 0:
             events[due].append(("checkup", checkup))
     return dict(events)
 
 
-def _build_health_message(child_name: str, events: dict[date, list[tuple[str, str]]], today: date) -> str:
+def _build_health_message(child_name: str, events: dict[date, list[tuple[str, str]]]) -> str:
     """Combine all health events into a single LINE message."""
-    lines = [f"🏥 {child_name} 的健康提醒"]
+    lines = [f"{child_name} 今日健康提醒"]
     for due_date in sorted(events):
-        days_until = (due_date - today).days
-        timing = "【今天】" if days_until == 0 else f"【7 天後 {due_date.strftime('%m/%d')}】"
-        vaccines  = [name for kind, name in events[due_date] if kind == "vaccine"]
-        checkups  = [name for kind, name in events[due_date] if kind == "checkup"]
+        vaccines = [name for kind, name in events[due_date] if kind == "vaccine"]
+        checkups = [name for kind, name in events[due_date] if kind == "checkup"]
         if vaccines:
-            lines.append(f"\n💉 {timing} 接種疫苗")
+            lines.append("\n【今日接種疫苗】")
             for v in vaccines:
-                lines.append(f"  • {v}")
+                lines.append(f"• {v}")
         if checkups:
-            lines.append(f"\n👶 {timing} 兒童健檢")
+            lines.append("\n【今日兒童健檢】")
             for c in checkups:
-                lines.append(f"  • {c}")
-    lines.append("\n請攜帶健兒手冊前往診所或衛生所 😊\n（資訊以衛福部最新公告為準）")
+                lines.append(f"• {c}")
+    lines.append("\n請攜帶健兒手冊前往診所或衛生所。\n（資訊以衛福部最新公告為準）")
     return "\n".join(lines)
 
 
@@ -154,10 +151,10 @@ def _get_milestone_message(birth_date: date, child_name: str, today: date) -> st
     if not text:
         return None
     return (
-        f"🌟 {child_name} 滿 {age} 個月了！\n\n"
+        f"{child_name} 滿 {age} 個月了！\n\n"
         f"這個月的發展里程碑：\n• {text}\n\n"
         "每個寶寶步調不同，以上為一般參考。\n"
-        "若有疑慮請諮詢兒科醫師 😊"
+        "若有疑慮請諮詢兒科醫師。"
     )
 
 
@@ -168,21 +165,25 @@ def _get_policy_reminder(child_name: str, age_months: int, city: str) -> str | N
 
     Only called on Tuesdays; GitHub policy data is crawled on Monday mornings,
     so Tuesday push guarantees the data is fresh.
+    Appends source title + URL when the RAG returns source metadata.
     Returns a formatted LINE message or None if nothing urgent.
     """
     try:
         import rag
         from llm import _chat
         query = f"{city or '台灣'} 寶寶 {age_months} 個月 育兒補助 政策 申請期限 截止日"
-        chunks = rag.query_rag(query)
+        chunks, sources = rag.query_rag_with_sources(query)
         if not chunks:
             return None
         knowledge = "\n".join(chunks[:3])
         prompt = (
             f"以下是育兒補助政策資訊（資料每週一更新）：\n{knowledge}\n\n"
             f"家長居住在「{city or '台灣'}」，{child_name}目前 {age_months} 個月大。\n"
-            "請用繁體中文（80字以內，不用 Markdown，條列用「•」）整理出近期最重要的申請提醒或截止日。\n"
-            "若沒有明確截止資訊，請只回覆「無相關截止提醒」。"
+            "請用繁體中文（80字以內，不用 Markdown，條列用「•」）列出這個月齡可能適用的育兒補助或注意事項。\n"
+            "重要規則：\n"
+            "1. 不可自行判斷「已過期」或「不符合資格」，一律列出項目讓家長自行上網確認\n"
+            "2. 每項結尾加上「詳情請上官網確認」\n"
+            "3. 若資訊完全不相關，才回覆「無相關提醒」"
         )
         reply = _chat(
             "你是育兒政策提醒助手，只輸出繁體中文摘要，不加任何解釋。",
@@ -192,7 +193,17 @@ def _get_policy_reminder(child_name: str, age_months: int, city: str) -> str | N
         )
         if not reply or "無相關截止提醒" in reply:
             return None
-        return f"📋 本週政策申請提醒\n\n{reply.strip()}\n\n（資料每週一自動更新，以政府最新公告為準）"
+
+        msg = f"本週政策申請提醒\n\n{reply.strip()}\n\n（資料每週一自動更新，以政府最新公告為準）"
+
+        # Append source links when the RAG returns them
+        valid_sources = [s for s in sources if s.get("url")]
+        if valid_sources:
+            msg += "\n\n📎 資料來源"
+            for s in valid_sources[:3]:  # cap at 3 links
+                msg += f"\n{s['title']}\n{s['url']}"
+
+        return msg
     except Exception as e:
         logger.warning("政策提醒查詢失敗：%s", e)
         return None
@@ -235,7 +246,7 @@ def _push_user_notifications(user: dict, child: dict, today: date, is_tuesday: b
     # 1. Health events (vaccine + checkup combined into one message)
     events = _due_health_events(birth_date, today)
     if events:
-        msg = _build_health_message(child_name, events, today)
+        msg = _build_health_message(child_name, events)
         _line_push(user_id, msg)
         logger.info("健康事件推播：user=%s events=%s", user_id, list(events.keys()))
 

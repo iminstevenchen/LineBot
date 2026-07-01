@@ -14,7 +14,7 @@ Usage:
 import os
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 
 # 讓 tests/ 目錄可以 import 專案根目錄的模組
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,38 +56,16 @@ def test_logic():
         print(f"  {months:2d} 個月 → {due}  {', '.join(vaccines)}")
 
     # 模擬：寶寶恰好是「2 個月前」出生 → 應觸發 2 個月接種提醒（days_until == 0）
-    print("\n=== days_until == 0 測試（2 個月里程碑）===")
+    print("\n=== 今日健康提醒測試（2 個月里程碑）===")
     birth_2mo = _birth_for_months_ago(2)
     events = _due_health_events(birth_2mo, today)
     if events:
-        msg = _build_health_message("小明", events, today)
+        msg = _build_health_message("小明", events)
         print(msg)
-        print("✅ 成功觸發健康提醒")
+        print("成功觸發健康提醒")
     else:
         print(f"  生日 {birth_2mo} → 今天沒有命中任何健康事件")
         print("  （若生日月份的天數不同可能差 1 天，屬正常）")
-
-    # 模擬：7 天後是 4 個月里程碑 → 應觸發 7 天前提醒
-    print("\n=== days_until == 7 測試（4 個月里程碑，提前 7 天）===")
-    four_month_due = _add_months(today, 4) if False else None
-    birth_4mo_7d = _birth_for_months_ago(4) + timedelta(days=7)  # 往後推 7 天讓 due 落在 today+7
-    # 直接手動製造 days_until==7 的情境：birth = today + 7 天 - 4個月
-    from push_scheduler import _add_months as am
-    test_birth = date(today.year, today.month, today.day)
-    # birth such that birth + 4mo = today + 7
-    target_due = today + timedelta(days=7)
-    y = target_due.year - (1 if target_due.month <= 4 else 0)
-    m = (target_due.month - 5) % 12 + 1
-    import calendar
-    d = min(target_due.day, calendar.monthrange(y, m)[1])
-    birth_7d_before_4mo = date(y, m, d)
-    events7 = _due_health_events(birth_7d_before_4mo, today)
-    if events7:
-        msg7 = _build_health_message("小花", events7, today)
-        print(msg7)
-        print("✅ 成功觸發 7 天前提醒")
-    else:
-        print(f"  生日 {birth_7d_before_4mo} → 今天沒有命中（日期邊界可能差 1 天）")
 
     # 里程碑：寶寶恰好今天滿 6 個月
     print("\n=== 里程碑測試（滿 6 個月）===")
@@ -128,36 +106,63 @@ def test_line_push(user_id: str):
             ("vaccine", "13價肺炎鏈球菌疫苗（第2劑）【測試】"),
             ("checkup", "第3次兒童預防保健（嬰兒期）【測試】"),
         ],
-        today + timedelta(days=7): [
-            ("vaccine", "B型肝炎疫苗（第3劑）【7天前預告測試】"),
-        ],
     }
-    health_msg = _build_health_message("測試寶寶", fake_events, today)
+    health_msg = _build_health_message("測試寶寶", fake_events)
     _line_push(user_id, health_msg)
-    print("✅ 健康提醒推播完成")
+    print("健康提醒推播完成")
     time.sleep(0.5)
 
     # 2. 里程碑
     milestone_msg = (
-        "🌟 測試寶寶 滿 6 個月了！【測試】\n\n"
+        "測試寶寶 滿 6 個月了！【測試】\n\n"
         "這個月的發展里程碑：\n"
         "• 扶著可以坐、可以開始嘗試副食品\n\n"
         "每個寶寶步調不同，以上為一般參考。\n"
-        "若有疑慮請諮詢兒科醫師 😊"
+        "若有疑慮請諮詢兒科醫師。"
     )
     _line_push(user_id, milestone_msg)
-    print("✅ 里程碑推播完成")
+    print("里程碑推播完成")
     time.sleep(0.5)
 
-    # 3. 政策提醒（固定假訊息，不呼叫 RAG，避免依賴外部服務）
-    policy_msg = (
-        "📋 本週政策申請提醒【測試】\n\n"
-        "• 台北市育兒津貼：本月底截止\n"
-        "• 托育補助：出生後 6 個月內申請\n\n"
-        "（資料每週一自動更新，以政府最新公告為準）"
-    )
+    # 3. 政策提醒：優先呼叫真實 RAG，fallback 到假資料（含 source 連結示範）
+    import config
+    import rag
+    if config.RAG_API_URL:
+        print("RAG_API_URL 已設定，呼叫真實 RAG...")
+        chunks, sources = rag.query_rag_with_sources("台北市 6 個月 育兒補助 政策 申請期限 截止日")
+        valid = [s for s in sources if s.get("url")]
+        if chunks:
+            policy_msg = (
+                f"本週政策申請提醒【RAG 測試】\n\n{chunks[0][:200]}\n\n"
+                "（資料每週一自動更新，以政府最新公告為準）"
+            )
+            if valid:
+                policy_msg += "\n\n📎 資料來源"
+                for s in valid[:3]:
+                    policy_msg += f"\n{s['title']}\n{s['url']}"
+                print(f"  附上 {len(valid)} 個來源連結")
+            else:
+                print("  RAG 未回傳 sources（隊友 API 未透傳），改用假來源示範格式")
+                policy_msg += (
+                    "\n\n📎 資料來源（格式示範）\n"
+                    "育兒津貼申請辦法\n"
+                    "https://www.mohw.gov.tw/cp-88-70961-1.html"
+                )
+        else:
+            policy_msg = "（RAG 無回應，略過政策提醒）"
+    else:
+        print("RAG_API_URL 未設定，使用假資料示範含 source 格式")
+        policy_msg = (
+            "本週政策申請提醒【測試】\n\n"
+            "• 台北市育兒津貼：本月底截止\n"
+            "• 托育補助：出生後 6 個月內申請\n\n"
+            "（資料每週一自動更新，以政府最新公告為準）\n\n"
+            "📎 資料來源\n"
+            "育兒津貼申請辦法\n"
+            "https://www.mohw.gov.tw/cp-88-70961-1.html"
+        )
     _line_push(user_id, policy_msg)
-    print("✅ 政策提醒推播完成（假資料）")
+    print("政策提醒推播完成")
 
 
 # ── 測試 3：完整流程（從 DB 撈真實用戶，走真正的推播邏輯）─────────────────────
