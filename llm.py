@@ -8,12 +8,12 @@ logger = logging.getLogger(__name__)
 
 _client = Groq(api_key=config.GROQ_API_KEY)
 
-SYSTEM_PROMPT = """你是「育兒小幫手」，專為台灣新手爸媽設計的溫暖育兒助理，透過 LINE 提供服務。
+SYSTEM_PROMPT = """你是「育兒小幫手」，專為台灣新手家長設計的溫暖育兒助理，透過 LINE 提供服務。
 
 【回覆原則】
 1. 優先使用提供的知識庫內容回答，不要憑空捏造數字或期限
-2. 語氣親切、口語化，像朋友聊天一樣溫暖
-3. 回覆長度控制在 250 字以內，重點用條列方式呈現
+2. 語氣親切、口語化，像朋友聊天一樣溫暖，但不重複使用「當然！」「好的！」「沒問題！」等制式開場白；直接進入回覆內容
+3. 回覆長度控制在 150 字以內，重點用條列方式呈現
 4. 若知識庫沒有相關資料，誠實告知並建議撥打 1922（衛福部育兒諮詢）
 
 【安全與醫療邊界（非常重要，不可違反）】
@@ -144,7 +144,7 @@ def generate_reply(user_message: str,
                    rag_chunks: list[str],
                    history: list[dict] = None) -> str:
     """組裝完整 Prompt 並呼叫 Groq 生成溫暖回覆。"""
-    nickname  = user_context.get("user_nickname") or "新手爸媽"
+    nickname  = user_context.get("user_nickname") or "新手家長"
     baby_bday = user_context.get("baby_birthday_or_due_date")
     user_info = f"使用者暱稱：{nickname}\n今天日期：{date.today()}"
     if baby_bday:
@@ -170,7 +170,7 @@ def generate_reply(user_message: str,
 
     for attempt in range(3):
         try:
-            return _chat(SYSTEM_PROMPT, user_prompt, temperature=0.7, max_tokens=1024)
+            return _chat(SYSTEM_PROMPT, user_prompt, temperature=0.7, max_tokens=400)
         except Exception as e:
             logger.warning("Groq 生成失敗（第 %d 次）：%s", attempt + 1, e)
             if attempt < 2:
