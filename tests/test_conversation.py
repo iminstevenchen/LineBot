@@ -23,7 +23,7 @@ MOCK_USER = {
     "baby_birthday_or_due_date": "2025-06-01",
     "baby_gender": "男",
     "region": "台北市",
-    "interests": "疫苗,健康檢查",
+    "interests": ["疫苗", "健康檢查"],
     "onboarding_state": "done",
 }
 

@@ -72,7 +72,7 @@ def init_tables() -> None:
             baby_birthday_or_due_date DATE,
             baby_gender          VARCHAR(10),
             region               VARCHAR(50),
-            interests            TEXT
+            interests            JSONB
         );
 
         CREATE TABLE IF NOT EXISTS children (
@@ -104,7 +104,7 @@ def init_tables() -> None:
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS baby_birthday_or_due_date DATE;
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS baby_gender         VARCHAR(10);
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS region              VARCHAR(50);
-        ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS interests           TEXT;
+        ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS interests           JSONB;
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS onboarding_state   VARCHAR(30) NOT NULL DEFAULT 'new';
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW();
         ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW();
