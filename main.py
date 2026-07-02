@@ -74,7 +74,7 @@ def admin_push_now():
 def handle_follow(event: FollowEvent):
     user_id = event.source.user_id
     db.get_or_create_user(user_id)
-    db.set_onboarding_state(user_id, 'waiting_parent_name')
+    db.set_onboarding_state(user_id, 'waiting_child_name')
     logger.info("新用戶加入：%s", user_id)
     _send_messages(event.reply_token, [onboarding.welcome()])
 
@@ -119,7 +119,7 @@ def handle_message(event: MessageEvent):
     }
     if state in _INITIAL_ONBOARDING:
         if state == 'new':
-            db.set_onboarding_state(user_id, 'waiting_parent_name')
+            db.set_onboarding_state(user_id, 'waiting_child_name')
             _send_messages(event.reply_token, [onboarding.welcome()])
         else:
             messages = onboarding.process(user_id, text, state)

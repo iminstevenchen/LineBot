@@ -159,8 +159,7 @@ def welcome() -> TextMessage:
     return _text(
         "👋 你好！歡迎加入育兒領航員！\n\n"
         "我可以幫你查詢育兒知識、疫苗時程、補助資訊、托育服務...\n\n"
-        "在開始前，讓我先認識您 💕\n\n"
-        f"請問您的名字是什麼？\n（{_MAX_NAME_LEN} 字以內，輸入「跳過」可略過）"
+        f"請問寶寶的名字是什麼？\n（{_MAX_NAME_LEN} 字以內，輸入「跳過」可略過）"
     )
 
 
@@ -268,7 +267,14 @@ def process(user_id: str, text: str, state: str) -> list[TextMessage]:
     if state == 'waiting_birth_order':
         if text not in BIRTH_ORDER_OPTIONS:
             return [_flex_choice("請選擇寶寶是第幾胎 😊", BIRTH_ORDER_OPTIONS)]
-        db.update_active_child(user_id, birth_order=BIRTH_ORDER_CODE[text])
+        order_code = BIRTH_ORDER_CODE[text]
+        active = db.get_active_child(user_id)
+        if _birth_order_taken(user_id, order_code, exclude_child_id=active.get('child_id')):
+            return [_flex_choice(
+                f"{text}已經有其他寶寶登記了，請重新選擇",
+                BIRTH_ORDER_OPTIONS
+            )]
+        db.update_active_child(user_id, birth_order=order_code)
         db.set_onboarding_state(user_id, 'waiting_special_status')
         return [_text(_SPECIAL_STATUS_PROMPT, ["以上皆無"])]
 
@@ -431,7 +437,14 @@ def process(user_id: str, text: str, state: str) -> list[TextMessage]:
     if state == 'edit_birth_order':
         if text not in BIRTH_ORDER_OPTIONS:
             return [_flex_choice("請點選下方按鈕選擇 😊", BIRTH_ORDER_OPTIONS, back=True, cancel=True)]
-        db.update_active_child(user_id, birth_order=BIRTH_ORDER_CODE[text])
+        order_code = BIRTH_ORDER_CODE[text]
+        active = db.get_active_child(user_id)
+        if _birth_order_taken(user_id, order_code, exclude_child_id=active.get('child_id')):
+            return [_flex_choice(
+                f"{text}已經有其他寶寶登記了，請重新選擇",
+                BIRTH_ORDER_OPTIONS, back=True, cancel=True
+            )]
+        db.update_active_child(user_id, birth_order=order_code)
         db.set_onboarding_state(user_id, 'done')
         return [_text("✅ 胎次已更新！\n\n有什麼育兒問題想問我嗎？😊")]
 
@@ -808,6 +821,15 @@ def _edit_prompt(state: str):
         'edit_child_name':   f"請輸入寶寶的新名字（{_MAX_NAME_LEN} 字以內）：" + _NAV_HINT,
     }
     return _text(text_prompts.get(state, "請輸入新的值：" + _NAV_HINT))
+
+
+def _birth_order_taken(user_id: str, order_code: int, exclude_child_id=None) -> bool:
+    """檢查同一用戶是否已有其他孩子使用相同胎次。"""
+    for child in db.get_children(user_id):
+        if child.get('birth_order') == order_code:
+            if exclude_child_id is None or child['child_id'] != exclude_child_id:
+                return True
+    return False
 
 
 def _parse_special_status(text: str) -> list[str] | None:
