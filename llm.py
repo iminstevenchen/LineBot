@@ -168,9 +168,11 @@ def generate_reply(user_message: str,
 
 請根據以上資訊，以溫暖友善的語氣回覆："""
 
+    _WEBSITE = "\n\n更多育兒資訊：\nhttps://parent-navigator.vercel.app"
     for attempt in range(3):
         try:
-            return _chat(SYSTEM_PROMPT, user_prompt, temperature=0.7, max_tokens=400)
+            reply = _chat(SYSTEM_PROMPT, user_prompt, temperature=0.7, max_tokens=400)
+            return reply + _WEBSITE
         except Exception as e:
             logger.warning("Groq 生成失敗（第 %d 次）：%s", attempt + 1, e)
             if attempt < 2:

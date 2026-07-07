@@ -163,6 +163,17 @@ def welcome() -> TextMessage:
     )
 
 
+def welcome_ask_phone() -> TextMessage:
+    """初次加入時先收集手機號碼，用於查詢網站帳號並連結資料。"""
+    return _text(
+        "👋 你好！歡迎加入育兒領航員！\n\n"
+        "我可以幫你查詢育兒知識、疫苗時程、補助資訊、托育服務...\n\n"
+        "首先，請問您的手機號碼？📱\n"
+        "格式：09XXXXXXXX（10碼）\n"
+        "（輸入「跳過」可略過）"
+    )
+
+
 def edit_select_target(children: list[dict]) -> FlexMessage:
     options = ["家長資料"] + _child_options(children)
     return _flex_choice("想修改哪個部分的資料？", options, cancel=True)
@@ -196,7 +207,7 @@ def process(user_id: str, text: str, state: str) -> list[TextMessage]:
             "輸入「跳過」可略過"
         )]
 
-    # ── 第一點五步：手機號碼 ───────────────────────────────────────────────────
+    # ── 第一點五步：手機號碼（並嘗試匯入網站帳號資料） ──────────────────────
     if state == 'waiting_phone_number':
         if text != "跳過":
             if not _is_valid_phone(text):
@@ -205,7 +216,37 @@ def process(user_id: str, text: str, state: str) -> list[TextMessage]:
                     "請輸入 10 碼台灣手機號碼，例如：0912345678\n"
                     "（輸入「跳過」可略過）"
                 )]
-            db.update_user_profile(user_id, phone_number=text)
+            cleaned = re.sub(r'[\s\-]', '', text)
+            db.update_user_profile(user_id, phone_number=cleaned)
+            website_user = db.lookup_website_profile_by_phone(cleaned)
+            has_data = bool(
+                website_user.get('region') or
+                website_user.get('baby_name') or
+                website_user.get('baby_birthday_or_due_date')
+            )
+            if has_data:
+                db.set_onboarding_state(user_id, 'confirm_website_profile')
+                return _website_profile_found(website_user)
+        db.set_onboarding_state(user_id, 'waiting_city')
+        return [_region_carousel()]
+
+    # ── 確認匯入網站資料 ──────────────────────────────────────────────────────
+    if state == 'confirm_website_profile':
+        if text == "是，匯入資料":
+            user = db.get_or_create_user(user_id)
+            phone = user.get('phone_number')
+            if phone:
+                db.import_website_profile(user_id, phone)
+            db.set_onboarding_state(user_id, 'done')
+            child = db.get_active_child(user_id)
+            baby = child.get('child_name') or '寶寶'
+            return [_text(
+                f"✅ 已匯入網站帳號資料！\n\n"
+                f"現在可以直接問我任何育兒問題 👶\n"
+                "例如：「寶寶發燒怎麼辦？」、「有哪些育兒補助？」\n\n"
+                "需要更新資料嗎？輸入「修改資料」即可。"
+            )]
+        # 否，重新填寫
         db.set_onboarding_state(user_id, 'waiting_city')
         return [_region_carousel()]
 
@@ -798,6 +839,27 @@ def _age_str(birth_date) -> str:
         return f"{months}個月" if months < 24 else f"{months // 12}歲"
     except Exception:
         return ""
+
+
+def _website_profile_found(website_user: dict) -> list:
+    """顯示網站帳號找到的資料，詢問是否匯入至 LINE Bot。"""
+    _GENDER_LABEL = {'male': '男寶寶', 'female': '女寶寶'}
+    name   = website_user.get('user_nickname') or '（未設定）'
+    city   = website_user.get('region') or '（未設定）'
+    baby   = website_user.get('baby_name') or '（未設定）'
+    bday   = str(website_user.get('baby_birthday_or_due_date') or '（未設定）')
+    gender = _GENDER_LABEL.get(website_user.get('baby_gender') or '', '（未設定）')
+    summary = _text(
+        f"找到您在網站的帳號資料 🎉\n\n"
+        f"家長姓名：{name}\n"
+        f"所在縣市：{city}\n"
+        f"寶寶名字：{baby}\n"
+        f"生日／預產期：{bday}\n"
+        f"性別：{gender}\n\n"
+        "是否匯入這份資料？"
+    )
+    buttons = _flex_choice("確認匯入", ["是，匯入資料", "否，重新填寫"])
+    return [summary, buttons]
 
 
 def _edit_prompt(state: str):

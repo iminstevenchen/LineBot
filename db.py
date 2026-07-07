@@ -306,6 +306,69 @@ def get_all_active_users_with_children() -> list[tuple[dict, dict]]:
     return result
 
 
+def lookup_website_profile_by_phone(phone: str) -> dict:
+    """查詢網站 users 表中是否有此手機號碼的資料；找不到或表不存在則回傳 {}。"""
+    sql = """
+        SELECT user_nickname, baby_name, baby_birthday_or_due_date,
+               baby_gender, region
+        FROM users
+        WHERE phone = %s
+        LIMIT 1
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (phone,))
+                row = cur.fetchone()
+        return dict(row) if row else {}
+    except Exception as e:
+        logger.warning("查詢網站用戶失敗（users 表可能不存在）: %s", e)
+        return {}
+
+
+def import_website_profile(line_user_id: str, phone: str) -> bool:
+    """
+    從網站 users 表匯入用戶資料至 LINE bot 資料表，並在 users 表寫入 line_user_id。
+    回傳 True 若成功匯入。
+    """
+    website_user = lookup_website_profile_by_phone(phone)
+    if not website_user:
+        return False
+
+    _GENDER = {'male': '男', 'female': '女'}
+    gender = _GENDER.get(website_user.get('baby_gender') or '', '') or None
+
+    update_user_profile(
+        line_user_id,
+        parent_name=website_user.get('user_nickname') or None,
+        city=website_user.get('region') or None,
+    )
+
+    baby_name = website_user.get('baby_name')
+    baby_birthday = website_user.get('baby_birthday_or_due_date')
+    if baby_name or baby_birthday:
+        create_child(line_user_id)
+        update_active_child(
+            line_user_id,
+            child_name=baby_name or None,
+            birth_date=str(baby_birthday) if baby_birthday else None,
+            gender=gender,
+        )
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET line_user_id = %s WHERE phone = %s",
+                    (line_user_id, phone)
+                )
+            conn.commit()
+    except Exception as e:
+        logger.warning("寫入 line_user_id 至 users 表失敗: %s", e)
+
+    return True
+
+
 def trim_chat_history(line_user_id: str, keep: int = 30) -> None:
     """只保留最近 keep 筆對話，超出的舊訊息刪除。"""
     sql = """

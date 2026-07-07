@@ -74,9 +74,16 @@ def admin_push_now():
 def handle_follow(event: FollowEvent):
     user_id = event.source.user_id
     db.get_or_create_user(user_id)
-    db.set_onboarding_state(user_id, 'waiting_child_name')
-    logger.info("新用戶加入：%s", user_id)
-    _send_messages(event.reply_token, [onboarding.welcome()])
+    # 自動抓 LINE 顯示名稱存入 parent_name
+    try:
+        with ApiClient(_line_conf) as client:
+            profile = MessagingApi(client).get_profile(user_id)
+            db.update_user_profile(user_id, parent_name=profile.display_name)
+            logger.info("抓取 LINE 顯示名稱：%s → %s", user_id, profile.display_name)
+    except Exception as e:
+        logger.warning("無法取得 LINE 顯示名稱：%s", e)
+    db.set_onboarding_state(user_id, 'waiting_phone_number')
+    _send_messages(event.reply_token, [onboarding.welcome_ask_phone()])
 
 
 # ── Postback 事件（DatetimePicker 等互動元件） ────────────────────────────────
@@ -113,9 +120,10 @@ def handle_message(event: MessageEvent):
 
     # ── 初始 Onboarding 狀態：不可被選單指令打斷 ─────────────────────────────
     _INITIAL_ONBOARDING = {
-        'new', 'waiting_parent_name', 'waiting_phone_number', 'waiting_city',
-        'waiting_parental_employment', 'waiting_child_name', 'waiting_child_birthday',
-        'waiting_child_gender', 'waiting_birth_order', 'waiting_special_status',
+        'new', 'waiting_parent_name', 'waiting_phone_number', 'confirm_website_profile',
+        'waiting_city', 'waiting_parental_employment', 'waiting_child_name',
+        'waiting_child_birthday', 'waiting_child_gender', 'waiting_birth_order',
+        'waiting_special_status',
     }
     if state in _INITIAL_ONBOARDING:
         if state == 'new':

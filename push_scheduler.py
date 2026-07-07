@@ -100,36 +100,46 @@ def _age_months(birth_date: date, today: date) -> int:
 
 # ── Health event collectors ───────────────────────────────────────────────────────
 
-def _due_health_events(birth_date: date, today: date) -> dict[date, list[tuple[str, str]]]:
-    """Return {due_date: [(kind, name), ...]} for events due exactly today.
+def _due_health_events(birth_date: date, today: date,
+                        lookahead: int = 0) -> dict[date, list[tuple[str, str]]]:
+    """Return {due_date: [(kind, name), ...]} for health events within lookahead days.
 
-    kind is either 'vaccine' or 'checkup'.
+    lookahead=0  → exact today only (daily same-day reminder)
+    lookahead=6  → today through today+6 (Monday weekly preview, 7-day window)
+    kind is 'vaccine' or 'checkup'.
     """
     events: dict[date, list] = defaultdict(list)
     for months, vaccines in _VACCINE_SCHEDULE.items():
         due = _add_months(birth_date, months)
-        if (due - today).days == 0:
+        if 0 <= (due - today).days <= lookahead:
             for v in vaccines:
                 events[due].append(("vaccine", v))
     for months, checkup in _CHECKUP_SCHEDULE.items():
         due = _add_months(birth_date, months)
-        if (due - today).days == 0:
+        if 0 <= (due - today).days <= lookahead:
             events[due].append(("checkup", checkup))
     return dict(events)
 
 
-def _build_health_message(child_name: str, events: dict[date, list[tuple[str, str]]]) -> str:
-    """Combine all health events into a single LINE message."""
-    lines = [f"{child_name} 今日健康提醒"]
+def _build_health_message(child_name: str, events: dict[date, list[tuple[str, str]]],
+                           weekly: bool = False) -> str:
+    """Combine all health events into a single LINE message.
+
+    weekly=True  → 「本週提醒」header with dates shown
+    weekly=False → 「今日提醒」header
+    """
+    header = "本週健康提醒" if weekly else "今日健康提醒"
+    lines = [f"{child_name} {header}"]
     for due_date in sorted(events):
         vaccines = [name for kind, name in events[due_date] if kind == "vaccine"]
         checkups = [name for kind, name in events[due_date] if kind == "checkup"]
+        date_label = f"（{due_date.strftime('%m/%d')}）" if weekly else ""
         if vaccines:
-            lines.append("\n【今日接種疫苗】")
+            lines.append(f"\n【接種疫苗{date_label}】")
             for v in vaccines:
                 lines.append(f"• {v}")
         if checkups:
-            lines.append("\n【今日兒童健檢】")
+            lines.append(f"\n【兒童健檢{date_label}】")
             for c in checkups:
                 lines.append(f"• {c}")
     lines.append("\n請攜帶健兒手冊前往診所或衛生所。\n（資訊以衛福部最新公告為準）")
@@ -158,15 +168,14 @@ def _get_milestone_message(birth_date: date, child_name: str, today: date) -> st
     )
 
 
-# ── Policy reminder (RAG-based, runs Tuesdays) ──────────────────────────────────
+# ── Policy reminder (RAG-based, runs Mondays) ───────────────────────────────────
 
 def _get_policy_reminder(child_name: str, age_months: int, city: str) -> str | None:
     """Query RAG (policy-pipeline indexed content) and summarise upcoming deadlines.
 
-    Only called on Tuesdays; GitHub policy data is crawled on Monday mornings,
-    so Tuesday push guarantees the data is fresh.
-    Appends source title + URL when the RAG returns source metadata.
-    Returns a formatted LINE message or None if nothing urgent.
+    Runs on Mondays as part of the weekly digest. GitHub policy data is crawled
+    on Monday early morning; the push fires at 09:00 after the crawl completes.
+    Returns a formatted LINE message or None if nothing relevant.
     """
     try:
         import rag
@@ -179,11 +188,13 @@ def _get_policy_reminder(child_name: str, age_months: int, city: str) -> str | N
         prompt = (
             f"以下是育兒補助政策資訊（資料每週一更新）：\n{knowledge}\n\n"
             f"家長居住在「{city or '台灣'}」，{child_name}目前 {age_months} 個月大。\n"
-            "請用繁體中文（80字以內，不用 Markdown，條列用「•」）列出這個月齡可能適用的育兒補助或注意事項。\n"
-            "重要規則：\n"
-            "1. 不可自行判斷「已過期」或「不符合資格」，一律列出項目讓家長自行上網確認\n"
-            "2. 每項結尾加上「詳情請上官網確認」\n"
-            "3. 若資訊完全不相關，才回覆「無相關提醒」"
+            "請列出這個月齡可能適用的育兒補助或注意事項，格式規則如下：\n"
+            "1. 全部使用繁體中文，簡體字一律轉換為繁體\n"
+            "2. 禁止使用任何 Markdown（不可用 #、##、**、- 等符號）\n"
+            "3. 條列用「•」開頭，每項一行\n"
+            "4. 總字數 80 字以內\n"
+            "5. 不可自行判斷「已過期」或「不符合資格」，一律列出讓家長自行確認\n"
+            "6. 若資訊完全不相關，才回覆「無相關提醒」"
         )
         reply = _chat(
             "你是育兒政策提醒助手，只輸出繁體中文摘要，不加任何解釋。",
@@ -194,15 +205,11 @@ def _get_policy_reminder(child_name: str, age_months: int, city: str) -> str | N
         if not reply or "無相關截止提醒" in reply:
             return None
 
-        msg = f"本週政策申請提醒\n\n{reply.strip()}\n\n（資料每週一自動更新，以政府最新公告為準）"
-
-        # Append source links when the RAG returns them
-        valid_sources = [s for s in sources if s.get("url")]
-        if valid_sources:
-            msg += "\n\n📎 資料來源"
-            for s in valid_sources[:3]:  # cap at 3 links
-                msg += f"\n{s['title']}\n{s['url']}"
-
+        msg = (
+            f"本週政策申請提醒\n\n{reply.strip()}\n\n"
+            "（資料每週一自動更新，以政府最新公告為準）\n\n"
+            "🔗 更多育兒資訊\nhttps://parent-navigator.vercel.app"
+        )
         return msg
     except Exception as e:
         logger.warning("政策提醒查詢失敗：%s", e)
@@ -230,8 +237,18 @@ def _line_push(user_id: str, text: str) -> None:
 
 # ── Per-user orchestration ────────────────────────────────────────────────────────
 
-def _push_user_notifications(user: dict, child: dict, today: date, is_tuesday: bool) -> None:
-    """Collect and send all relevant notifications for one user today."""
+def _push_user_notifications(user: dict, child: dict, today: date, is_monday: bool) -> None:
+    """Send all relevant notifications for one user.
+
+    Monday (週初) — weekly digest:
+      ① 7-day health preview (upcoming vaccines/checkups this week)
+      ② Policy reminder (RAG, data fresh after Monday crawl)
+      ③ Milestone if anniversary falls within this week
+
+    Other days — same-day reminders only:
+      ① Today's health events (exact day)
+      ② Milestone if today is the exact anniversary
+    """
     user_id    = user.get("line_user_id")
     birth_date = child.get("birth_date")
     if not user_id or not birth_date:
@@ -243,41 +260,63 @@ def _push_user_notifications(user: dict, child: dict, today: date, is_tuesday: b
     city       = user.get("city") or ""
     age_months = _age_months(birth_date, today)
 
-    # 1. Health events (vaccine + checkup combined into one message)
-    events = _due_health_events(birth_date, today)
-    if events:
-        msg = _build_health_message(child_name, events)
-        _line_push(user_id, msg)
-        logger.info("健康事件推播：user=%s events=%s", user_id, list(events.keys()))
+    if is_monday:
+        # ── Weekly digest (週初推播) ──────────────────────────────────────────
+        # 1. Health events in the next 7 days
+        events = _due_health_events(birth_date, today, lookahead=6)
+        if events:
+            msg = _build_health_message(child_name, events, weekly=True)
+            _line_push(user_id, msg)
+            logger.info("週初健康預告：user=%s events=%d", user_id, len(events))
 
-    # 2. Developmental milestone (only on the exact monthly anniversary)
-    milestone_msg = _get_milestone_message(birth_date, child_name, today)
-    if milestone_msg:
-        _line_push(user_id, milestone_msg)
-        logger.info("里程碑推播：user=%s age=%d months", user_id, age_months)
+        # 2. Milestone if anniversary is within this week
+        for offset in range(7):
+            check_day = today + timedelta(days=offset)
+            milestone_msg = _get_milestone_message(birth_date, child_name, check_day)
+            if milestone_msg:
+                days_away = offset
+                prefix = "" if days_away == 0 else f"（{check_day.strftime('%m/%d')}）"
+                _line_push(user_id, prefix + milestone_msg if prefix else milestone_msg)
+                logger.info("週初里程碑預告：user=%s age=%d offset=%d", user_id, age_months, offset)
+                break  # only notify the nearest upcoming milestone
 
-    # 3. Policy deadlines — Tuesdays only (data fresh after Monday crawl)
-    if is_tuesday and config.RAG_API_URL:
-        policy_msg = _get_policy_reminder(child_name, age_months, city)
-        if policy_msg:
-            _line_push(user_id, policy_msg)
-            logger.info("政策推播：user=%s age=%d city=%s", user_id, age_months, city)
+        # 3. Policy reminder (RAG, crawl done by Monday 09:00)
+        if config.RAG_API_URL:
+            policy_msg = _get_policy_reminder(child_name, age_months, city)
+            if policy_msg:
+                _line_push(user_id, policy_msg)
+                logger.info("週初政策推播：user=%s age=%d city=%s", user_id, age_months, city)
+    else:
+        # ── Same-day reminders (非週一) ───────────────────────────────────────
+        # 1. Today's health events only
+        events = _due_health_events(birth_date, today, lookahead=0)
+        if events:
+            msg = _build_health_message(child_name, events, weekly=False)
+            _line_push(user_id, msg)
+            logger.info("當日健康提醒：user=%s", user_id)
+
+        # 2. Milestone on exact anniversary
+        milestone_msg = _get_milestone_message(birth_date, child_name, today)
+        if milestone_msg:
+            _line_push(user_id, milestone_msg)
+            logger.info("當日里程碑：user=%s age=%d months", user_id, age_months)
 
 
 # ── Main daily job ────────────────────────────────────────────────────────────────
 
 def run_daily_push() -> None:
     """Entry point called once daily by the scheduler (and by /admin/push-now)."""
-    today = datetime.now(_TW_TZ).date()
-    is_tuesday = datetime.now(_TW_TZ).weekday() == 1  # 1 = Tuesday
-    logger.info("每日推播任務開始 date=%s is_tuesday=%s", today, is_tuesday)
+    now       = datetime.now(_TW_TZ)
+    today     = now.date()
+    is_monday = now.weekday() == 0  # 0 = Monday
+    logger.info("每日推播任務開始 date=%s is_monday=%s", today, is_monday)
     try:
         import db
         pairs = db.get_all_active_users_with_children()
         logger.info("活躍用戶：%d 位", len(pairs))
         for user, child in pairs:
             try:
-                _push_user_notifications(user, child, today, is_tuesday)
+                _push_user_notifications(user, child, today, is_monday)
             except Exception as e:
                 logger.error("推播失敗：user=%s err=%s", user.get("line_user_id"), e)
     except Exception as e:
